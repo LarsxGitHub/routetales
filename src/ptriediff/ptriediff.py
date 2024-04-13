@@ -15,10 +15,12 @@ logger = logging.getLogger(__name__)
 
 # ----------------- DataClasses to track Prefix-level Diff results -----------------
 
+
 class DiffType(Enum):
   GAIN = 1
   LOSS = 2
   MAIN = 3
+
 
 @dataclass
 class ClassDiff:
@@ -31,13 +33,16 @@ class ClassDiff:
 
   def count_change(self, t: DiffType):
     if t == DiffType.GAIN:
-        self.gain += 1
+      self.gain += 1
     elif t == DiffType.LOSS:
-        self.loss += 1
+      self.loss += 1
     elif t == DiffType.MAIN:
-        self.main += 1
+      self.main += 1
     else:
-      raise ValueError("No counting option associated with unknown DiffType %d.")
+      raise ValueError(
+        "No counting option associated with unknown DiffType %d."
+      )
+
 
 @dataclass
 class ClassTracker:
@@ -60,7 +65,8 @@ class ClassTracker:
   # pfx has direct less-specific
   has_direct_less_specific: InitVar[ClassDiff] = ClassDiff()
   # pfx has (in)direct less-specific
-  has_direct_less_specific: InitVar[ClassDiff] = ClassDiff()
+  has_less_specific: InitVar[ClassDiff] = ClassDiff()
+
 
 @dataclass
 class PfxFowardDiff:
@@ -72,11 +78,15 @@ class PfxFowardDiff:
   # the number of pfx only in older, newer, and both
   cnt_pfx: InitVar[ClassDiff] = ClassDiff()
   # Classtracker values by CIDR size
-  classtracker_by_cidr: InitVar[DefaultDict[int, ClassTracker]] = defaultdict(ClassTracker)
+  classtracker_by_cidr: InitVar[DefaultDict[int, ClassTracker]] = defaultdict(
+    ClassTracker
+  )
   # Classtracker for all prefixes
   class_totals: InitVar[ClassTracker] = ClassTracker()
 
+
 # ----------------- Helper functions -----------------
+
 
 def matches_to_difftype(old_match: bool, new_match: bool) -> DiffType:
   """Helper function to turn the characteristic matches into a DiffType.
@@ -94,15 +104,19 @@ def matches_to_difftype(old_match: bool, new_match: bool) -> DiffType:
     return DiffType.LOSS
   return DiffType.GAIN
 
+
 def count_direct_msps(pyt: PyTricia, pfx: ipaddress.ip_network) -> int:
   cnt = 0
   direct_msps = pfx.subnets(prefixlen_diff=1)
   for msp in direct_msps:
     if pyt.has_key(msp):
       cnt += 1
-  return cnt 
+  return cnt
 
-def count_msp_covered_addresses(pyt: PyTricia, pfx: ipaddress.ip_network) -> int:
+
+def count_msp_covered_addresses(
+  pyt: PyTricia, pfx: ipaddress.ip_network
+) -> int:
   # Pytricia's children() and parent() methods return strings instead of network types ...
   pfx_str = str(pfx)
   maxcidr = 32 if pfx.version == 4 else 128
@@ -111,34 +125,98 @@ def count_msp_covered_addresses(pyt: PyTricia, pfx: ipaddress.ip_network) -> int
   for msp in pyt.children(pfx):
     # ignore pfx itself and msps of msps to avoid overcounting.
     if pyt.parent(msp) != pfx_str:
-      continue 
-    # Calc the addresses in the prefix. 
-    cnt += (2**(maxcidr - int(msp.rsplit("/", 1)[1])))
-  return cnt 
+      continue
+    # Calc the addresses in the prefix.
+    cnt += 2 ** (maxcidr - int(msp.rsplit("/", 1)[1]))
+  return cnt
+
+
+def has_sibling_in_pyt(pyt: PyTricia, pfx: ipaddress.ip_network) -> bool:
+  # turn address into an integer
+  base = int(pfx.network_address)
+
+  # flip the bit at the right position
+  cidr_max = 32 if pfx.version == 4 else 128
+  sib_base = base ^ (2 ** (cidr_max - pfx.prefixlen))
+
+  # turn back into a prefix and check if it exists.
+  sib = ipaddress.ip_network((sib_base, pfx.prefixlen))
+  return pyt.has_key(sib)
+
+
+def has_direct_less_specific_in_pyt(
+  pyt: PyTricia, pfx: ipaddress.ip_network
+) -> bool:
+  par = pyt.parent(pfx)
+  if par:
+    return pfx.prefixlen - int(par.rsplit("/", 1)[1]) == 1
+  return False
+
 
 # ----------------- Functions to Compare Pyts at prefix -----------------
 
-def has_no_direct_msp_coverage(old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network) -> DiffType:
+
+def has_no_direct_msp_coverage(
+  old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network
+) -> DiffType:
   return matches_to_difftype(
-    count_direct_msps(old, pfx) == 0,
-    count_direct_msps(new, pfx) == 0,
+    count_direct_msps(old, pfx) == 0, count_direct_msps(new, pfx) == 0
   )
 
 
-def has_partial_direct_msp_coverage(old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network) -> DiffType:
+def has_partial_direct_msp_coverage(
+  old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network
+) -> DiffType:
   return matches_to_difftype(
-    count_direct_msps(old, pfx) == 1,
-    count_direct_msps(new, pfx) == 1,
-)
+    count_direct_msps(old, pfx) == 1, count_direct_msps(new, pfx) == 1
+  )
 
-def has_full_direct_msp_coverage(old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network) -> DiffType:
+
+def has_full_direct_msp_coverage(
+  old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network
+) -> DiffType:
   return matches_to_difftype(
-    count_direct_msps(old, pfx) == 2,
-    count_direct_msps(new, pfx) == 2,
-)
+    count_direct_msps(old, pfx) == 2, count_direct_msps(new, pfx) == 2
+  )
 
-def has_address_msp_coverage(old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network) -> Tuple[DiffType, DiffType, DiffType]:
-  pass
+
+def combined_has_address_msp_coverage(
+  old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network
+) -> Tuple[DiffType, DiffType, DiffType]:
+  full_cov = pfx.num_addresses
+  old_cov = count_msp_covered_addresses(old, pfx)
+  new_cov = count_msp_covered_addresses(new, pfx)
+
+  return (
+    matches_to_difftype(old_cov == 0, new_cov == 0),
+    matches_to_difftype(0 < old_cov < full_cov, 0 < new_cov < full_cov),
+    matches_to_difftype(old_cov == full_cov, new_cov == full_cov),
+  )
+
+
+def has_sibling(
+  old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network
+) -> DiffType:
+  return matches_to_difftype(
+    has_sibling_in_pyt(old, pfx), has_sibling_in_pyt(new, pfx)
+  )
+
+
+def has_direct_less_specific(
+  old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network
+) -> DiffType:
+  return matches_to_difftype(
+    has_direct_less_specific_in_pyt(old, pfx),
+    has_direct_less_specific_in_pyt(new, pfx),
+  )
+
+
+def has_less_specific(
+  old: PyTricia, new: PyTricia, pfx: ipaddress.ip_network
+) -> DiffType:
+  return matches_to_difftype(
+    old.parent(pfx) is not None, new.parent(pfx) is not None
+  )
 
 
 @dataclass
@@ -150,7 +228,8 @@ class AsLevelFowardDiff:
 
 
 def forward_diff_pyts(old: PyTricia, new: PyTricia) -> PfxFowardDiff:
-  pass 
+  pass
+
 
 @dataclass
 class PytMeta:
@@ -189,13 +268,15 @@ class Snapshot:
       ValueError: If vis_frac is not within [0|1) interval.
     """
     if not (0.0 <= vis_frac < 1.0):
-      raise ValueError("vis_frac must be in interval [0|1), yet is: %f", vis_frac)
+      raise ValueError(
+        "vis_frac must be in interval [0|1), yet is: %f", vis_frac
+      )
 
     # Calculate thresholds.
     thresh_asn = int(self.max_vis_asn * vis_frac)
     thresh_nhop = int(self.max_vis_nhop * vis_frac)
 
-    # Collect pfxs to remove. 
+    # Collect pfxs to remove.
     to_remove = []
     for pfx in self.pyt:
       meta = self.pyt.get(pfx)
@@ -209,6 +290,7 @@ class Snapshot:
 
     # return number of removed prefixes.
     return len(to_remove)
+
 
 def load_pfx_tries(fn: str) -> Tuple[Snapshot, Snapshot]:
   pyt4, pyt6 = PyTricia(32), PyTricia(128)
@@ -288,5 +370,3 @@ if __name__ == "__main__":
   cnt = len(snap6.pyt)
   rcnt = snap6.remove_low_vis_pfxs(0.67)
   print(f"removed {rcnt} of initially {cnt} IPv6 prefixes.")
-
-
