@@ -299,7 +299,7 @@ def forward_count_diff(old: PyTricia, new: PyTricia) -> DefaultDict[int, ClassDi
     else:
       diff[pfx.prefixlen].count_change(DiffType.LOSS)
   for pfx_str in new:
-    if old.has_key:
+    if old.has_key(pfx_str):
       continue
     pfx = ipaddress.ip_network(pfx_str)
     diff[pfx.prefixlen].count_change(DiffType.GAIN)
