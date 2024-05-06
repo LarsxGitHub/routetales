@@ -32,7 +32,7 @@ def outdir_from_date(basepath: str, date: datetime.date) -> str:
 
 def outfile_from_date(basepath: str, k: int, date: datetime.date) -> str:
   path = os.path.join(basepath, date.strftime("%Y-%m/"))
-  fn = f"pbr_{k}_" + date.strftime("%Y-%m-%d.bz2")
+  fn = f"pbr_{k}_" + date.strftime("%Y-%m-%d.pkl")
   return os.path.join(path, fn)
 
 def res2csv(res: pfxburnrate.BurnRateResult) -> str:
